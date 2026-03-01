@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Youtube Like View Ratio",
+  "version": "1.0.0",
+  "description": "Displays the likes per view ratio for YouTube thumbnails.",
+  "author": "Seventh",
+  "icons": {
+    "96": "icons/icon96.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_icon": "icons/icon96.png",
+    "default_title": "Settings",
+    "default_popup": "options.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "browser_style": false
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "js": [
+        "lib/jquery-3.6.1.min.js",
+        "content-script.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "permissions": [
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.returnyoutubedislikeapi.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "css/bar-blue-gray.css",
+        "css/bar-blue-gray-video-page.css",
+        "css/bar-bottom-separator.css",
+        "css/bar-bottom-tooltip.css",
+        "css/bar-bottom.css",
+        "css/bar-green-red.css",
+        "css/bar-green-red-video-page.css",
+        "css/bar-tooltip.css",
+        "css/bar-top-separator.css",
+        "css/bar-top-tooltip.css",
+        "css/bar-top.css",
+        "css/bar.css"
+      ],
+      "matches": [],
+      "extension_ids": []
+    }
+  ]
+}
