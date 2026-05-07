@@ -23,7 +23,7 @@ const ADD_RATING_BAR_TO_SHORTS = false;
 const isDarkTheme = getComputedStyle(document.body).getPropertyValue('--yt-spec-general-background-a') === ' #181818';
 
 const THUMBNAIL_SELECTORS = [];
-THUMBNAIL_SELECTORS[THEME_MODERN] = 'a#thumbnail[href]';
+THUMBNAIL_SELECTORS[THEME_MODERN] = 'a#thumbnail[href], a[href*="/watch?v="], a[href*="/shorts/"]';
 THUMBNAIL_SELECTORS[THEME_CLASSIC] = '.video-thumb:not(.yt-thumb-20):not(.yt-thumb-27):not(.yt-thumb-32):not(.yt-thumb-36):not(.yt-thumb-48):not(.yt-thumb-64), .thumb-wrapper, .pl-header-thumb';
 THUMBNAIL_SELECTORS[THEME_GAMING] = 'ytg-thumbnail:not([avatar]):not(.avatar):not(.ytg-user-avatar):not(.ytg-box-art):not(.ytg-compact-gaming-event-renderer):not(.ytg-playlist-header-renderer)';
 THUMBNAIL_SELECTORS[THEME_MOBILE] = 'a.media-item-thumbnail-container, a.compact-media-item-image, a.video-card-image';
@@ -147,7 +147,7 @@ function ratingToPercentage(rating) {
 function getMetadataHtml(videoData, likesPer1k, isWatched) {
   let scoreHtml = '';
   if (likesPer1k !== null) {
-    scoreHtml = ' <span style="margin: 0 4px; color: var(--yt-spec-text-secondary);">•</span> <span class="ytrb-score">' + Math.round(likesPer1k).toLocaleString() + '</span>';
+    scoreHtml = '<span class="ytrb-score">' + Math.round(likesPer1k).toLocaleString() + '</span>';
   }
 
   let watchedHtml = '';
@@ -157,7 +157,6 @@ function getMetadataHtml(videoData, likesPer1k, isWatched) {
 
   return (
     '<span class="style-scope ytd-video-meta-block ytd-grid-video-renderer ytrb-percentage">' +
-    '<span style="color: var(--yt-spec-text-secondary);">' + ratingToPercentage(videoData.rating) + '</span>' +
     scoreHtml +
     watchedHtml +
     '</span>'
@@ -281,15 +280,36 @@ function retryProcessingThumbnailInTheFuture(thumbnail) {
 
 function getVideoData(thumbnail, videoId) {
   return new Promise((resolve) => {
-    browser.runtime.sendMessage({ query: 'videoApiRequest', videoId: videoId }, (likesData) => {
-      // Check for lastError to handle disconnected ports or other messaging errors
-      if (browser.runtime.lastError || !likesData) {
+    try {
+      // Check if runtime is still available (extension context may be invalidated)
+      if (!browser || !browser.runtime) {
         retryProcessingThumbnailInTheFuture(thumbnail);
         resolve(null);
-      } else {
-        resolve(getVideoDataObject(likesData.likes, likesData.dislikes, likesData.viewCount));
+        return;
       }
-    });
+
+      const messageHandler = (likesData) => {
+        try {
+          // Check for lastError to handle disconnected ports or other messaging errors
+          if (browser.runtime.lastError || !likesData) {
+            retryProcessingThumbnailInTheFuture(thumbnail);
+            resolve(null);
+          } else {
+            resolve(getVideoDataObject(likesData.likes, likesData.dislikes, likesData.viewCount));
+          }
+        } catch (err) {
+          // Callback error handling
+          retryProcessingThumbnailInTheFuture(thumbnail);
+          resolve(null);
+        }
+      };
+
+      browser.runtime.sendMessage({ query: 'videoApiRequest', videoId: videoId }, messageHandler);
+    } catch (err) {
+      // Extension context invalidated or other error - retry later
+      retryProcessingThumbnailInTheFuture(thumbnail);
+      resolve(null);
+    }
   });
 }
 
@@ -305,68 +325,89 @@ function getWatchPercentage(thumbnail) {
 }
 
 function addVideoMetadata(thumbnail, videoData) {
-  let metadataLine;
-  if (curTheme === THEME_MOBILE) {
-    metadataLine = $(thumbnail)
-      .closest('ytm-media-item')
-      .find('ytm-badge-and-byline-renderer')
-      .last();
-  } else {
-    metadataLine = $(thumbnail)
-      .closest(
-        '.ytd-rich-item-renderer, ' +
-        '.ytd-grid-renderer, ' +
-        '.ytd-expanded-shelf-contents-renderer, ' +
-        '.yt-horizontal-list-renderer, ' +
-        '.ytd-item-section-renderer, ' +
-        '.ytd-horizontal-card-list-renderer, ' +
-        '.ytd-playlist-video-list-renderer',
-      )
-      .find('#metadata-line')
-      .last();
+  const container = $(thumbnail).closest(
+    '.ytd-rich-item-renderer, ' +
+    '.ytd-grid-renderer, ' +
+    '.ytd-expanded-shelf-contents-renderer, ' +
+    '.yt-horizontal-list-renderer, ' +
+    '.ytd-item-section-renderer, ' +
+    '.ytd-horizontal-card-list-renderer, ' +
+    '.ytd-playlist-video-list-renderer',
+  );
+
+  if (!container.length) {
+    console.log('[YTRB] No container found');
+    return;
   }
 
-  if (metadataLine) {
-    for (const oldPercentage of metadataLine.children('.ytrb-percentage')) {
-      oldPercentage.remove();
-    }
-    if (curTheme === THEME_MOBILE) {
-      for (const oldPercentage of metadataLine.children(
-        '.ytrb-percentage-separator',
-      )) {
-        oldPercentage.remove();
-      }
-    }
-
-    if (
-      videoData.rating != null &&
-      !(videoData.likes === 0 && videoData.dislikes >= 10)
-    ) {
-      let likesPer1k = null;
-      if (videoData.viewCount && videoData.viewCount > 0) {
-        likesPer1k = (videoData.likes / videoData.viewCount) * 1000;
-        $(thumbnail).attr('data-ytrb-score', likesPer1k);
-      }
-
-      const watchPercentage = getWatchPercentage(thumbnail);
-      const isWatched = watchPercentage > 90;
-      const metadataHtml = getMetadataHtml(videoData, likesPer1k, isWatched);
-      const lastSpan = metadataLine.children('span').last();
-      if (lastSpan.length) {
-        lastSpan.after(metadataHtml);
-        if (curTheme === THEME_MOBILE) {
-          lastSpan.after(
-            '<span class="ytm-badge-and-byline-separator ytrb-percentage-separator" aria-hidden="true">•</span>',
-          );
-        }
-      } else {
-        metadataLine.prepend(metadataHtml);
-        metadataLine.prepend(
-          '<span class="style-scope ytd-video-meta-block"></span>',
-        );
-      }
-    }
+  if (
+    videoData.rating == null ||
+    (videoData.likes === 0 && videoData.dislikes >= 10)
+  ) {
+    console.log('[YTRB] Invalid video data');
+    return;
   }
+
+  let likesPer1k = null;
+  if (videoData.viewCount && videoData.viewCount > 0) {
+    likesPer1k = (videoData.likes / videoData.viewCount) * 1000;
+    $(thumbnail).attr('data-ytrb-score', likesPer1k);
+  }
+
+  const watchPercentage = getWatchPercentage(thumbnail);
+  const isWatched = watchPercentage > 90;
+  const metadataHtml = getMetadataHtml(videoData, likesPer1k, isWatched);
+
+  // Remove existing metadata if any
+  container.find('.ytrb-percentage').remove();
+  container.find('.ytrb-percentage-separator').remove();
+
+  // Strategy 1: Try to inject into existing metadata-line or meta-block
+  let metadataLine = container.find('#metadata-line').last();
+  if (!metadataLine.length) {
+    metadataLine = container.find('ytd-video-meta-block').last();
+  }
+
+  if (metadataLine.length) {
+    console.log('[YTRB] Found metadata-line via strategy 1');
+    const lastSpan = metadataLine.children('span').last();
+    if (lastSpan.length) {
+      lastSpan.after(metadataHtml);
+    } else {
+      metadataLine.append(metadataHtml);
+    }
+    return;
+  }
+
+  // Strategy 2: Find the last span/div that looks like metadata and append after it
+  const lastTextSpan = container.find('span').filter(function () {
+    const text = $(this).text().trim();
+    // Look for views, ago, channel names, or any reasonable metadata
+    return text.match(/(views|watched|ago|by|^[A-Z][\w\s]*$|^\d+[KMB]?$)/i) && text.length < 100;
+  }).last();
+
+  if (lastTextSpan.length) {
+    console.log('[YTRB] Found metadata-like span via strategy 2');
+    lastTextSpan.after(metadataHtml);
+    return;
+  }
+
+  // Strategy 3: Try to find the info section and inject there
+  const infoSection = container.find('div').filter(function () {
+    return $(this).attr('id') && $(this).attr('id').includes('info');
+  }).last();
+
+  if (infoSection.length) {
+    console.log('[YTRB] Found info section via strategy 3');
+    infoSection.append(metadataHtml);
+    return;
+  }
+
+  // Strategy 4: Just inject before the thumbnail ends (fallback)
+  console.log('[YTRB] Using fallback strategy 4');
+  container.find('ytd-video-renderer, ytd-grid-video-renderer, .yt-simple-endpoint').first().after(
+    '<div style="padding: 8px 0;">' + metadataHtml + '</div>'
+  );
 }
 
 function updateColors() {
@@ -409,10 +450,12 @@ function updateColors() {
       scoreSpan.css({
         'background-color': bgColor,
         'color': textColor,
-        'padding': '2px 6px',
+        'padding': '3px 8px',
         'border-radius': '4px',
-        'font-weight': '500',
-        'margin-left': '4px'
+        'font-weight': '550',
+        'font-size': '12px',
+        'margin-left': '4px',
+        'display': 'inline-block'
       });
     }
   });
@@ -422,19 +465,25 @@ function processNewThumbnails() {
   const thumbnails = getNewThumbnails();
   const thumbnailsAndVideoIds = getThumbnailsAndIds(thumbnails);
 
+  console.log('[YTRB] Found thumbnails:', thumbnailsAndVideoIds.length, 'Theme:', curTheme);
+
   const promises = [];
   for (const [thumbnail, videoId] of thumbnailsAndVideoIds) {
     const p = getVideoData(thumbnail, videoId).then((videoData) => {
       if (videoData !== null) {
+        console.log('[YTRB] Got video data for', videoId, ':', videoData);
         if (userSettings.showMetadata) {
           addVideoMetadata(thumbnail, videoData);
         }
+      } else {
+        console.log('[YTRB] No video data for', videoId);
       }
     });
     promises.push(p);
   }
 
   Promise.all(promises).then(() => {
+    console.log('[YTRB] All metadata processed');
     updateColors();
     applyFilters();
   });
