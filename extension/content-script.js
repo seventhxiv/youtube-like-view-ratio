@@ -112,7 +112,7 @@ function applyFilters() {
 
     if (userSettings.filterHideWatched) {
       const watchPercentage = getWatchPercentage(thumbnail);
-      if (watchPercentage > 90) {
+      if (watchPercentage > 82) {
         shouldHide = true;
       }
     }
@@ -314,13 +314,24 @@ function getVideoData(thumbnail, videoId) {
 }
 
 function getWatchPercentage(thumbnail) {
-  const progressBar = $(thumbnail).find('ytd-thumbnail-overlay-resume-playback-renderer #progress');
+  // New YouTube UI: Look for yt-thumbnail-overlay-progress-bar-view-model
+  let progressSegment = $(thumbnail).find('yt-thumbnail-overlay-progress-bar-view-model .ytThumbnailOverlayProgressBarHostWatchedProgressBarSegment');
+  if (progressSegment.length) {
+    const width = progressSegment[0].style.width;
+    if (width && width.endsWith('%')) {
+      return parseFloat(width);
+    }
+  }
+
+  // Old YouTube UI: Look for ytd-thumbnail-overlay-resume-playback-renderer
+  let progressBar = $(thumbnail).find('ytd-thumbnail-overlay-resume-playback-renderer #progress');
   if (progressBar.length) {
     const width = progressBar[0].style.width;
     if (width && width.endsWith('%')) {
       return parseFloat(width);
     }
   }
+
   return 0;
 }
 
@@ -499,6 +510,10 @@ function handleDomMutations() {
 
     if (userSettings.showMetadata) {
       processNewThumbnails();
+    } else {
+      // Apply filters even if metadata is not shown
+      applyFilters();
+      injectFilterMenu();
     }
 
     hasUnseenDomMutations = false;
